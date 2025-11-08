@@ -1,0 +1,213 @@
+import tkinter as tk
+from tkinter import ttk, messagebox, filedialog
+from datetime import datetime
+
+# -----------------------------
+# Data models
+# -----------------------------
+class Product:
+    def __init__(self, sku, name, size, toppings, price, stock, active=True):
+        self.sku = sku
+        self.name = name
+        self.size = size
+        self.toppings = toppings
+        self.price = price
+        self.stock = stock
+        self.active = active
+
+    def display_name(self):
+        return f"{self.name} ({self.size}) + {self.toppings}"
+
+class CartItem:
+    def __init__(self, product, qty=1):
+        self.product = product
+        self.qty = qty
+
+    @property
+    def subtotal(self):
+        return self.product.price * self.qty
+
+# -----------------------------
+# Store
+# -----------------------------
+class Store:
+    def __init__(self):
+        self.products = {}
+        self._seed()
+
+    def _seed(self):
+        items = [
+            Product("MT001", "Classic Milk Tea", "Medium", "Pearls", 80.0, 20),
+            Product("MT002", "Wintermelon", "Large", "Nata", 95.0, 15),
+            Product("MT003", "Matcha Latte", "Medium", "Red Bean", 100.0, 10),
+            Product("MT004", "Okinawa", "Large", "Pearls", 90.0, 12),
+            Product("MT005", "Taro Milk Tea", "Medium", "None", 85.0, 18),
+        ]
+        for p in items:
+            self.products[p.sku] = p
+
+    def list_products(self, active_only=True):
+        return [p for p in self.products.values() if (p.active or not active_only)]
+
+    def find(self, sku):
+        return self.products.get(sku)
+
+# -----------------------------
+# Receipt generator
+# -----------------------------
+def generate_receipt(order_id, customer, items, subtotal, discount, total, paid, change, method):
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    lines = []
+    lines.append("=== Milk Tea Shop Receipt ===")
+    lines.append(f"Order ID: {order_id}")
+    lines.append(f"Date: {now}")
+    lines.append(f"Customer: {customer}")
+    lines.append("-" * 30)
+    for item in items:
+        lines.append(f"{item.product.display_name()}")
+        lines.append(f"  {item.qty} x {item.product.price:.2f} = {item.subtotal:.2f}")
+    lines.append("-" * 30)
+    lines.append(f"Subtotal: {subtotal:.2f}")
+    lines.append(f"Discount: -{discount:.2f}")
+    lines.append(f"Total: {total:.2f}")
+    lines.append(f"Paid ({method}): {paid:.2f}")
+    lines.append(f"Change: {change:.2f}")
+    lines.append("=" * 30)
+    lines.append("Thank you! Enjoy your drink 🧋")
+    return "\n".join(lines)
+
+# -----------------------------
+# Main App
+# -----------------------------
+class MilkTeaPOS(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("Milk Tea Shop POS System")
+        self.geometry("900x600")
+        self.store = Store()
+        self.cart = {}
+        self.discount = 0.0
+        self._build_ui()
+        self._refresh_inventory()
+
+    def _build_ui(self):
+        # Inventory
+        inv_frame = ttk.LabelFrame(self, text="Menu")
+        inv_frame.pack(side="left", fill="both", expand=True, padx=10, pady=10)
+
+        self.inventory = ttk.Treeview(inv_frame, columns=("sku","name","price","stock"), show="headings")
+        self.inventory.pack(fill="both", expand=True)
+        for col in ("sku","name","price","stock"):
+            self.inventory.heading(col, text=col.capitalize())
+
+        ttk.Button(inv_frame, text="Add to Cart", command=self._add_to_cart).pack(pady=5)
+
+        # Cart
+        cart_frame = ttk.LabelFrame(self, text="Cart")
+        cart_frame.pack(side="right", fill="both", expand=True, padx=10, pady=10)
+
+        self.cart_tv = ttk.Treeview(cart_frame, columns=("sku","name","qty","subtotal"), show="headings")
+        self.cart_tv.pack(fill="both", expand=True)
+        for col in ("sku","name","qty","subtotal"):
+            self.cart_tv.heading(col, text=col.capitalize())
+
+        ttk.Button(cart_frame, text="Remove Item", command=self._remove_item).pack(pady=5)
+
+        # Totals
+        self.subtotal_var = tk.StringVar(value="0.00")
+        self.discount_var = tk.StringVar(value="0.00")
+        self.total_var = tk.StringVar(value="0.00")
+
+        ttk.Label(cart_frame, text="Subtotal:").pack()
+        ttk.Label(cart_frame, textvariable=self.subtotal_var).pack()
+        ttk.Label(cart_frame, text="Discount:").pack()
+        ttk.Label(cart_frame, textvariable=self.discount_var).pack()
+        ttk.Label(cart_frame, text="Total:").pack()
+        ttk.Label(cart_frame, textvariable=self.total_var).pack()
+
+        # Checkout
+        self.customer_var = tk.StringVar()
+        self.payment_var = tk.StringVar(value="Cash")
+        self.paid_var = tk.StringVar(value="0.00")
+
+        ttk.Label(cart_frame, text="Customer Name").pack()
+        ttk.Entry(cart_frame, textvariable=self.customer_var).pack()
+        ttk.Label(cart_frame, text="Payment Method").pack()
+        ttk.Combobox(cart_frame, textvariable=self.payment_var, values=["Cash","GCash","Card"]).pack()
+        ttk.Label(cart_frame, text="Amount Paid").pack()
+        ttk.Entry(cart_frame, textvariable=self.paid_var).pack()
+
+        ttk.Button(cart_frame, text="Checkout", command=self._checkout).pack(pady=10)
+
+        # Receipt
+        self.receipt_text = tk.Text(self, height=10)
+        self.receipt_text.pack(fill="x", padx=10, pady=10)
+
+        ttk.Button(self, text="Save Receipt", command=self._save_receipt).pack(pady=5)
+
+    def _refresh_inventory(self):
+        self.inventory.delete(*self.inventory.get_children())
+        for p in self.store.list_products():
+            self.inventory.insert("", "end", iid=p.sku, values=(p.sku, p.display_name(), f"{p.price:.2f}", p.stock))
+
+    def _add_to_cart(self):
+        sel = self.inventory.selection()
+        if not sel: return
+        sku = sel[0]
+        product = self.store.find(sku)
+        if not product: return
+        if product.stock <= 0:
+            messagebox.showinfo("Out of stock", "This drink is sold out.")
+            return
+        item = self.cart.get(sku)
+        if item: item.qty += 1
+        else: self.cart[sku] = CartItem(product, 1)
+        self._refresh_cart()
+
+    def _remove_item(self):
+        sel = self.cart_tv.selection()
+        if not sel: return
+        sku = sel[0]
+        if sku in self.cart: del self.cart[sku]
+        self._refresh_cart()
+
+    def _refresh_cart(self):
+        self.cart_tv.delete(*self.cart_tv.get_children())
+        for sku,item in self.cart.items():
+            self.cart_tv.insert("", "end", iid=sku, values=(sku, item.product.display_name(), item.qty, f"{item.subtotal:.2f}"))
+        self._recalc_totals()
+
+    def _recalc_totals(self):
+        subtotal = sum(item.subtotal for item in self.cart.values())
+        total = subtotal - self.discount
+        self.subtotal_var.set(f"{subtotal:.2f}")
+        self.discount_var.set(f"{self.discount:.2f}")
+        self.total_var.set(f"{total:.2f}")
+
+    def _checkout(self):
+        if not self.cart:
+            messagebox.showinfo("Empty cart", "No items in cart.")
+            return
+        customer = self.customer_var.get().strip() or "Walk-in"
+        subtotal = sum(item.subtotal for item in self.cart.values())
+        total = subtotal - self.discount
+        try:
+            paid = float(self.paid_var.get())
+        except ValueError:
+            messagebox.showerror("Invalid", "Amount paid must be a number.")
+            return
+        if paid < total:
+            messagebox.showwarning("Insufficient", "Payment is less than total.")
+            return
+        change = paid - total
+        order_id = f"ORD-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        receipt = generate_receipt(order_id, customer, list(self.cart.values()), subtotal, self.discount, total, paid, change, self.payment_var.get())
+        self.receipt_text.delete("1.0", tk.END)
+        self.receipt_text.insert(tk.END, receipt)
+        # Update stock
+        for item in self.cart.values():
+            item.product.stock -= item.qty
+        self.cart.clear()
+        self._refresh_cart()
+        self._refresh_inventory()
+        messagebox.showinfo("Success", f"Order
